@@ -120,18 +120,18 @@ class WeatherBot(commands.Bot):
         fem_outfit = get_fem_style(temp)
         masc_outfit = get_masc_style(temp)
     
-        weather_addition = ""
-        if weather_condition.lower().find('rain') != -1:
-            if wind_speed > 20:
-                weather_addition = "\n      ⛈️ Due to wind and rain: Add a waterproof raincoat, avoid umbrellas. Consider waterproof boots and rain pants."
-            else:
-                weather_addition = "\n      🌧️ For rain: Bring an umbrella, consider water-resistant shoes."
-        elif weather_condition.lower().find('snow') != -1:
-            weather_addition = "\n      ❄️ For snow: Add waterproof boots, warm socks, and snow-appropriate outerwear."
-        elif wind_speed > 20:
-            weather_addition = "\n      💨 Due to high winds: Add wind-resistant layers, secure loose items."
+        # weather_addition = ""
+        # if weather_condition.lower().find('rain') != -1:
+        #     if wind_speed > 20:
+        #         weather_addition = "\n      ⛈️ Due to wind and rain: Add a waterproof raincoat, avoid umbrellas. Consider waterproof boots and rain pants."
+        #     else:
+        #         weather_addition = "\n      🌧️ For rain: Bring an umbrella, consider water-resistant shoes."
+        # elif weather_condition.lower().find('snow') != -1:
+        #     weather_addition = "\n      ❄️ For snow: Add waterproof boots, warm socks, and snow-appropriate outerwear."
+        # elif wind_speed > 20:
+        #     weather_addition = "\n      💨 Due to high winds: Add wind-resistant layers, secure loose items."
 
-        return f"\n      👗 Feminine style: {fem_outfit}\n      👔 Masculine style: {masc_outfit}{weather_addition}"
+        return f"\n      👗 Feminine style: {fem_outfit}\n      👔 Masculine style: {masc_outfit}"
     
         
     # @tasks.loop(hours=24)
@@ -141,32 +141,49 @@ class WeatherBot(commands.Bot):
     #         if weather_data:
     #             user = await self.fetch_user(user_id)
     #             await self.send_weather_report(user, weather_data)
-
+    def get_sunscreen_advice(self, temp: float, condition: str) -> str:
+        condition = condition.lower()
+        if any(word in condition for word in ['clear', 'sun', 'fair']):
+            if temp > 75:
+                return "\n      🧴 HIGH UV ALERT: Don't forget SPF 50+! Reapply every 2 hours. Your future self (and dermatologist) will thank you!"
+            else:
+                return "\n      🧴 Moderate UV levels: SPF 30+ recommended. Yes, even on cooler days - those UV rays are sneaky!"
+        elif any(word in condition for word in ['cloud', 'overcast', 'fog']):
+            return "\n      🧴 UV Reminder: Clouds only block 20% of UV rays - SPF 30 is still your friend!"
+        elif any(word in condition for word in ['rain', 'storm', 'thunder']):
+            return "\n      🧴 Low UV today, but if it clears up, don't forget your sunscreen!"
+        else:
+            return "\n      🧴 Better safe than sorry - pack that sunscreen!"
+    def get_wind_description(self, wind_speed: float) -> str:
+        if wind_speed < 5:
+            return "Calm - Perfect for that freshly styled hair!"
+        elif wind_speed < 12:
+            return "Light breeze - Your picnic napkins might want to escape"
+        elif wind_speed < 20:
+            return "Moderate breeze - Hold onto your hat and those loose papers!"
+        elif wind_speed < 30:
+            return "Strong breeze - Your umbrella wants to be Mary Poppins & those false lashes might try to take flight"
+        elif wind_speed < 40:
+            return "Very windy - Your wig is plotting its escape & skirts are becoming dangerous"
+        else:
+            return "Extremely windy - Everything not bolted down is becoming a projectile & your hairdo doesn't stand a chance"
     async def send_weather_report(self, user, weather_data: Dict, channel=None):
-        temp = (weather_data['main']['temp'] * 9/5) + 32
-        feels_like = (weather_data['main']['feels_like'] * 9/5) + 32
-        wind_speed = weather_data['wind']['speed'] * 2.237  # Convert m/s to mph
+        temp = round((weather_data['main']['temp'] * 9/5) + 32)
+        feels_like = round((weather_data['main']['feels_like'] * 9/5) + 32)
+        wind_speed = round(weather_data['wind']['speed'] * 2.237)  # Convert m/s to mph
         condition = weather_data['weather'][0]['description']
         outfit = self.get_outfit_suggestion(temp, condition, wind_speed)
-        wind_description = "Calm"
-        if wind_speed < 5:
-            wind_description = "Calm"
-        elif wind_speed < 12:
-            wind_description = "Light breeze"
-        elif wind_speed < 20:
-            wind_description = "Moderate breeze"
-        elif wind_speed < 30:
-            wind_description = "Strong breeze"
-        else:
-            wind_description = "Very windy"
+        sunscreen_advice = self.get_sunscreen_advice(temp, condition)
+        wind_description = self.get_wind_description(wind_speed)
         
         message = (
             f"Weather report for {user.mention}:\n"
-            f"🌡️ Temperature: {temp}°F\n"
+            f"🌡️ Temperature: {temp:.1f}°F\n"
             f"🌪️ Feels like: {feels_like:.1f}°F\n"
             f"💨 Wind: {wind_description} ({wind_speed:.1f} mph)\n"
             f"🌤️ Condition: {condition}\n"
             f"👖 Suggested outfit: {outfit}"
+            f"{sunscreen_advice}"
         )
         
         if channel:
