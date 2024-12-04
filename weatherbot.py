@@ -5,6 +5,7 @@ import datetime
 from typing import Dict, Optional
 import os
 from dotenv import load_dotenv
+import asyncio
 
 load_dotenv()
 
@@ -16,10 +17,12 @@ class WeatherBot(commands.Bot):
         intents.members = True
         super().__init__(command_prefix=command_prefix, intents=intents)
         self.weather_api_key = os.getenv('WEATHER_API_KEY')
-        self.user_locations = {}
+        self.user_preferences = {}  # Format: {user_id: {"location": city, "time": "HH:MM" , "channel_id": channel_id}}}
+        self.scheduled_tasks = {}
+
         
     async def setup_hook(self):
-        self.check_weather.start()
+        await self.schedule_all_tasks()
 
     def get_weather(self, city: str) -> Optional[Dict]:
         try:
@@ -32,7 +35,51 @@ class WeatherBot(commands.Bot):
         except Exception as e:
             print(f"Error fetching weather: {e}")
             return None
+        
+    def is_valid_time_format(self, time_str: str) -> bool:
+        try:
+            datetime.datetime.strptime(time_str, "%H:%M")
+            return True
+        except ValueError:
+            return False
+        
+    async def schedule_weather_task(self, user_id: int, time_str: str):
+        # Cancel existing task if it exists
+        if user_id in self.scheduled_tasks:
+            self.scheduled_tasks[user_id].cancel()
 
+        # Calculate time until first run
+        now = datetime.datetime.now()
+        target_time = datetime.datetime.strptime(time_str, "%H:%M").time()
+        target_datetime = datetime.datetime.combine(now.date(), target_time)
+        
+        # If target time is already passed today, schedule for tomorrow
+        if target_datetime <= now:
+            target_datetime += datetime.timedelta(days=1)
+        
+        delay = (target_datetime - now).total_seconds()
+
+        # Create new task
+        async def scheduled_task():
+            await asyncio.sleep(delay)
+            while True:
+                if user_id in self.user_preferences:
+                    weather_data = self.get_weather(self.user_preferences[user_id]["location"])
+                    if weather_data:
+                        user = await self.fetch_user(user_id)
+                        channel = self.get_channel(self.user_preferences[user_id]["channel_id"])
+                        if channel:
+                            await self.send_weather_report(user, weather_data, channel)
+                await asyncio.sleep(86400)  # Wait 24 hours before next update
+
+        task = asyncio.create_task(scheduled_task())
+        self.scheduled_tasks[user_id] = task
+
+    async def schedule_all_tasks(self):
+        # Schedule tasks for all existing users
+        for user_id, prefs in self.user_preferences.items():
+            await self.schedule_weather_task(user_id, prefs["time"])
+    
     def get_outfit_suggestion(self, temp: float, weather_condition: str, wind_speed: float) -> str:
         def get_fem_style(temp: float) -> str:
             if temp >= 90:
@@ -73,7 +120,6 @@ class WeatherBot(commands.Bot):
         fem_outfit = get_fem_style(temp)
         masc_outfit = get_masc_style(temp)
     
-    # Add weather-specific modifications
         weather_addition = ""
         if weather_condition.lower().find('rain') != -1:
             if wind_speed > 20:
@@ -86,14 +132,15 @@ class WeatherBot(commands.Bot):
             weather_addition = "\n      💨 Due to high winds: Add wind-resistant layers, secure loose items."
 
         return f"\n      👗 Feminine style: {fem_outfit}\n      👔 Masculine style: {masc_outfit}{weather_addition}"
-
-    @tasks.loop(hours=24)
-    async def check_weather(self):
-        for user_id, location in self.user_locations.items():
-            weather_data = self.get_weather(location)
-            if weather_data:
-                user = await self.fetch_user(user_id)
-                await self.send_weather_report(user, weather_data)
+    
+        
+    # @tasks.loop(hours=24)
+    # async def check_weather(self):
+    #     for user_id, location in self.user_locations.items():
+    #         weather_data = self.get_weather(location)
+    #         if weather_data:
+    #             user = await self.fetch_user(user_id)
+    #             await self.send_weather_report(user, weather_data)
 
     async def send_weather_report(self, user, weather_data: Dict, channel=None):
         temp = (weather_data['main']['temp'] * 9/5) + 32
@@ -146,12 +193,26 @@ async def weather(ctx, *, city: str):
         await ctx.send("Sorry, couldn't find weather data for that location.")
 
 @bot.command(name='setlocation')
-async def set_location(ctx, *, city: str):
-    """Set your default location for daily updates"""
+async def set_location(ctx, city: str, time: str = None):
+    """Set your default location and preferred time (in EST) for daily updates"""
+    if not time:
+        await ctx.send("Please provide both city and time in 24-hour format (EST). Example: !setlocation 'New York' 08:00")
+        return
+
+    if not bot.is_valid_time_format(time):
+        await ctx.send("Invalid time format. Please use 24-hour format (HH:MM). Example: 08:00 for 8 AM, 13:30 for 1:30 PM")
+        return
+
     weather_data = bot.get_weather(city)
     if weather_data:
-        bot.user_locations[ctx.author.id] = city
-        await ctx.send(f"Location set to {city}. You'll receive daily weather updates!")
+        bot.user_preferences[ctx.author.id] = {
+            "location": city,
+            "time": time,
+            "channel_id": ctx.channel.id
+        }
+        # Schedule the new task
+        await bot.schedule_weather_task(ctx.author.id, time)
+        await ctx.send(f"Location set to {city}. You'll receive daily weather updates at {time} EST!")
     else:
         await ctx.send("Invalid location. Please try again.")
 
