@@ -36,6 +36,46 @@ class WeatherBot(commands.Bot):
             print(f"Error fetching weather: {e}")
             return None
         
+    def get_forecast(self, city: str) -> Optional[Dict]:
+        try:
+            url = f"http://api.openweathermap.org/data/2.5/forecast?q={city}&appid={self.weather_api_key}&units=metric"
+            response = requests.get(url)
+            data = response.json()
+            if response.status_code == 200:
+                return data
+            return None
+        except Exception as e:
+            print(f"Error fetching forecast: {e}")
+            return None
+
+    def get_precipitation_warning(self, city: str) -> str:
+        forecast = self.get_forecast(city)
+        if not forecast:
+            return ""
+    
+        current_time = datetime.datetime.now()
+        end_time = current_time + datetime.timedelta(hours=12)
+    
+        precipitation_times = []
+        for period in forecast['list']:
+            period_time = datetime.datetime.fromtimestamp(period['dt'])
+        
+            if period_time > end_time:
+                break
+            
+            weather = period['weather'][0]['main'].lower()
+            if 'rain' in weather or 'snow' in weather:
+                formatted_time = period_time.strftime('%I:%M %p')
+                hours_from_now = round((period_time - current_time).total_seconds() / 3600)
+                time_detail = f"{formatted_time} ({hours_from_now}h from now)"
+                precipitation_times.append((time_detail, weather))
+    
+        if precipitation_times:
+            time, weather = precipitation_times[0]  # Get only first precipitation event
+            emoji = '🌧️' if 'rain' in weather else '❄️'
+            return f"\n⚠️ Weather Alert: {emoji} {weather.title()} expected at {time}"
+        return ""
+        
     def is_valid_time_format(self, time_str: str) -> bool:
         try:
             datetime.datetime.strptime(time_str, "%H:%M")
@@ -81,66 +121,94 @@ class WeatherBot(commands.Bot):
             await self.schedule_weather_task(user_id, prefs["time"])
     
     def get_outfit_suggestion(self, temp: float, weather_condition: str, wind_speed: float) -> str:
-        def get_fem_style(temp: float) -> str:
+        def get_outfits(temp: float) -> dict:
             if temp >= 90:
-                return "Lightweight sundresses, breezy tank tops, loose shorts, hair up in a messy bun or braids for coolness. Consider moisture-wicking fabrics."
+                return {
+                    "tops": "Lightweight and breathable: tank tops, sleeveless shirts, loose-fitting tees",
+                    "bottoms": "Shorts, lightweight skirts, breathable loose pants",
+                    "shoes": "Sandals, breathable sneakers, open-toed shoes",
+                    "accessories": "Wide-brimmed hat, sunglasses, cooling neck wrap",
+                    "layers": "Consider a light cotton shawl or kimono for sun protection"
+                }
             elif temp >= 80:
-                return "Flowy midi dresses, cropped tops with high-waisted shorts, light skirts with breathable tops. Consider a light kimono for sun protection."
+                return {
+                "tops": "Breathable short-sleeves, lightweight button-ups, breezy blouses",
+                "bottoms": "Shorts, skirts, lightweight pants, capris",
+                "shoes": "Comfortable sandals, breathable sneakers, lightweight shoes",
+                "accessories": "Sunglasses, hat, lightweight scarf",
+                "layers": "Light cardigan or shawl for indoor AC"
+            }
             elif temp >= 70:
-                return "A-line dresses with short sleeves, culottes with blouses, cotton jumpsuits. Add a light cardigan for evening."
+                return {
+                "tops": "T-shirts, short-sleeve button-ups, light sweaters",
+                "bottoms": "Light pants, knee-length skirts, cropped pants",
+                "shoes": "Sneakers, loafers, light boots",
+                "accessories": "Light scarf, sunglasses",
+                "layers": "Light jacket or cardigan for evening"
+            }
             elif temp >= 60:
-                return "Midi skirts with light sweaters, shirt dresses with tights, cropped trousers with fitted tops. Layer with a denim jacket or blazer."
+                return {
+                "tops": "Long-sleeve shirts, light sweaters, button-ups",
+                "bottoms": "Full-length pants, midi skirts, regular jeans",
+                "shoes": "Closed-toe shoes, light boots, sneakers",
+                "accessories": "Light scarf, beanie",
+                "layers": "Light jacket, denim jacket, or blazer"
+            }
             elif temp >= 50:
-                return "Sweater dresses with boots, layered tops with ponte pants, long skirts with turtlenecks. Add a trench coat or light wool coat."
+                return {
+                "tops": "Sweaters, long-sleeve shirts, turtlenecks",
+                "bottoms": "Warm pants, thick leggings, wool skirts",
+                "shoes": "Boots, closed-toe shoes, warm socks",
+                "accessories": "Scarf, warm hat, gloves",
+                "layers": "Medium-weight jacket or coat"
+            }
             elif temp >= 40:
-                return "Wool dresses with thermal tights, chunky sweaters with lined pants, knee-high boots. Layer with a warm peacoat."
+                return {
+                "tops": "Thick sweaters, thermal shirts, fleece tops",
+                "bottoms": "Warm pants, thermal leggings, insulated bottoms",
+                "shoes": "Insulated boots, warm socks",
+                "accessories": "Warm scarf, beanie, gloves",
+                "layers": "Heavy coat, consider thermal underlayers"
+            }
             elif temp >= 30:
-                return "Insulated leggings under dresses, thermal base layers, chunky knit sweaters, waterproof boots. Add a down coat and warm accessories."
+                return {
+                "tops": "Thermal base layer, thick sweaters, fleece",
+                "bottoms": "Insulated pants, thermal leggings, warmest options",
+                "shoes": "Insulated waterproof boots, wool socks",
+                "accessories": "Thick scarf, warm hat, insulated gloves",
+                "layers": "Heavy winter coat, thermal underlayers essential"
+            }
             else:
-                return "Heavy thermal layers under warm dresses or pants, insulated boots, maximum layering with wool and down materials."
+                return {
+                "tops": "Maximum thermal layers, heaviest sweaters",
+                "bottoms": "Insulated pants, thermal base layer",
+                "shoes": "Insulated snow boots, multiple layers of socks",
+                "accessories": "Warmest hat, scarf, and gloves/mittens",
+                "layers": "Heaviest winter coat, multiple thermal layers"
+            }
 
-        def get_masc_style(temp: float) -> str:
-            if temp >= 90:
-                return "Loose cotton shorts, breathable short-sleeve shirts, lightweight chino shorts. Consider moisture-wicking athletic wear."
-            elif temp >= 80:
-                return "Bermuda shorts, polo shirts, light chinos with rolled ankles, breathable button-downs with sleeves rolled."
-            elif temp >= 70:
-                return "Chino shorts or light pants, short-sleeve henley shirts, light cotton button-downs. Add a light pullover for evening."
-            elif temp >= 60:
-                return "Chinos or jeans with long-sleeve tees, casual button-downs, light sweaters. Layer with a light jacket."
-            elif temp >= 50:
-                return "Dark jeans or wool pants, flannel shirts, medium-weight sweaters. Add a quilted jacket or heavy blazer."
-            elif temp >= 40:
-                return "Heavy jeans or wool trousers, thick sweaters, thermal undershirts. Layer with a wool coat."
-            elif temp >= 30:
-                return "Insulated pants, heavy sweaters with base layers, winter boots. Add a heavy down jacket and warm accessories."
+        outfit = get_outfits(temp)
+    
+        weather_addition = ""
+        if weather_condition.lower().find('rain') != -1:
+            if wind_speed > 20:
+                weather_addition = "\n      ⛈️ Weather protection: Add a sturdy waterproof raincoat and water-resistant pants. Skip the umbrella - it won't survive!"
             else:
-                return "Maximum layering with thermal base layer, insulated pants, heavy sweater, and serious winter coat."
+                weather_addition = "\n      🌧️ Weather protection: Pack an umbrella and wear water-resistant footwear"
+        elif weather_condition.lower().find('snow') != -1:
+            weather_addition = "\n      ❄️ Weather protection: Waterproof boots, snow gear, and extra warm socks essential"
+        elif wind_speed > 20:
+            weather_addition = "\n      💨 Weather protection: Add wind-resistant outer layer, secure loose items and accessories"
 
-        fem_outfit = get_fem_style(temp)
-        masc_outfit = get_masc_style(temp)
+        return (
+        f"\n      👕 Tops: {outfit['tops']}"
+        f"\n      👖 Bottoms: {outfit['bottoms']}"
+        f"\n      👟 Shoes: {outfit['shoes']}"
+        f"\n      🧣 Accessories: {outfit['accessories']}"
+        f"\n      🧥 Layers: {outfit['layers']}"
+        f"{weather_addition}"
+        )
     
-        # weather_addition = ""
-        # if weather_condition.lower().find('rain') != -1:
-        #     if wind_speed > 20:
-        #         weather_addition = "\n      ⛈️ Due to wind and rain: Add a waterproof raincoat, avoid umbrellas. Consider waterproof boots and rain pants."
-        #     else:
-        #         weather_addition = "\n      🌧️ For rain: Bring an umbrella, consider water-resistant shoes."
-        # elif weather_condition.lower().find('snow') != -1:
-        #     weather_addition = "\n      ❄️ For snow: Add waterproof boots, warm socks, and snow-appropriate outerwear."
-        # elif wind_speed > 20:
-        #     weather_addition = "\n      💨 Due to high winds: Add wind-resistant layers, secure loose items."
-
-        return f"\n      👗 Feminine style: {fem_outfit}\n      👔 Masculine style: {masc_outfit}"
-    
-        
-    # @tasks.loop(hours=24)
-    # async def check_weather(self):
-    #     for user_id, location in self.user_locations.items():
-    #         weather_data = self.get_weather(location)
-    #         if weather_data:
-    #             user = await self.fetch_user(user_id)
-    #             await self.send_weather_report(user, weather_data)
     def get_sunscreen_advice(self, temp: float, condition: str) -> str:
         condition = condition.lower()
         if any(word in condition for word in ['clear', 'sun', 'fair']):
@@ -154,6 +222,7 @@ class WeatherBot(commands.Bot):
             return "\n      🧴 Low UV today, but if it clears up, don't forget your sunscreen!"
         else:
             return "\n      🧴 Better safe than sorry - pack that sunscreen!"
+
     def get_wind_description(self, wind_speed: float) -> str:
         if wind_speed < 5:
             return "Calm - Perfect for that freshly styled hair!"
@@ -167,6 +236,7 @@ class WeatherBot(commands.Bot):
             return "Very windy - Your wig is plotting its escape & skirts are becoming dangerous"
         else:
             return "Extremely windy - Everything not bolted down is becoming a projectile & your hairdo doesn't stand a chance"
+
     async def send_weather_report(self, user, weather_data: Dict, channel=None):
         temp = round((weather_data['main']['temp'] * 9/5) + 32)
         feels_like = round((weather_data['main']['feels_like'] * 9/5) + 32)
@@ -175,14 +245,16 @@ class WeatherBot(commands.Bot):
         outfit = self.get_outfit_suggestion(temp, condition, wind_speed)
         sunscreen_advice = self.get_sunscreen_advice(temp, condition)
         wind_description = self.get_wind_description(wind_speed)
+        precipitation_warning = self.get_precipitation_warning(weather_data['name'])
         
         message = (
             f"Weather report for {user.mention}:\n"
             f"🌡️ Temperature: {temp:.1f}°F\n"
             f"🌪️ Feels like: {feels_like:.1f}°F\n"
             f"💨 Wind: {wind_description} ({wind_speed:.1f} mph)\n"
-            f"🌤️ Condition: {condition}\n"
-            f"👖 Suggested outfit: {outfit}"
+            f"🌤️ Condition: {condition}"
+            f"{precipitation_warning}\n"
+            f"🥼 Suggested outfit: {outfit}"
             f"{sunscreen_advice}"
         )
         
@@ -193,12 +265,6 @@ class WeatherBot(commands.Bot):
 
 
 bot = WeatherBot(command_prefix='!')
-
-try:
-    bot = WeatherBot(command_prefix='!')
-except Exception as e:
-    print(f"Failed to initialize bot: {e}")
-    exit(1)
 
 @bot.command(name='weather')
 async def weather(ctx, *, city: str):
@@ -243,3 +309,4 @@ except discord.LoginFailure:
     print("Failed to login. Please check your token.")
 except Exception as e:
     print(f"An error occurred: {e}")
+
